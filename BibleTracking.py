@@ -2,11 +2,28 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib.widgets import TextBox
 from matplotlib.widgets import Button
+from matplotlib.widgets import RadioButtons
 from matplotlib.axes import Axes
 import numpy as np
 import sqlite3
 from datetime import datetime
 from datetime import date
+BOOKS_OF_THE_BIBLE = ( 'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
+                      'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
+                      '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles',
+                      'Ezra', 'Nehemiah', 'Esther', 'Job', 'Psalm','Proverbs',
+                      'Ecclesiastes','Song of Solomon','Isaiah','Jeremiah',
+                      'Lamentations','Ezekiel','Daniel', 'Hosea','Joel',
+                      'Amos','Obadiah','Jonah','Micah','Nahum','Habakkuk',
+                      'Zephaniah','Haggai','Zechariah','Malachi','Matthew',
+                      'Mark','Luke','John','Acts','Romans','1 Corinthians',
+                      '2 Corinthians','Galatians','Ephesians','Philippians',
+                      'Colossians','1 Thessalonians','2 Thessalonians',
+                      '1 Timothy','2 Timothy','Titus','Philemon','Hebrews',
+                      'James','1 Peter','2 Peter','1 John','2 John','3 John',
+                      'Jude','Revelation')
+
+
 
 class Gui:
     #this is a bad hack I need to figure out a better way to write this
@@ -130,50 +147,52 @@ class Gui:
         self.plan.set_xticks([])
         self.plan.set_yticks([])
         self.planText1 = self.plan.text(0.5,0.5, "Plan:", horizontalalignment="center", fontsize=15)
-        self.planText2 =self. plan.text(0.1, 0.25, "1 Chapter a day", fontsize=10)
+        self.planText2 = self.plan.text(0.1, 0.25, "1 Chapter a day", fontsize=10)
 
         #reading input
         self.inputV= self.fig.add_subplot(self.gs[1,2])
         self.inputV.set_xticks([])
         self.inputV.set_yticks([])
         self.LabelIn = self.inputV.text(0.5, 0.75, "Input Verses in",horizontalalignment="center", fontsize=10)
-        self.Format = self.inputV.text(0.5, 0.60, "BOK:CH:VS",horizontalalignment="center", fontsize=10)
+        self.Format = self.inputV.text(0.5, 0.60, "CH:VS",horizontalalignment="center", fontsize=10)
 
         #number representation to work with sql
         self.VerseS = None
         self.VerseE = None
         self.startDBConnection()
         self.updateInitial()
+
+        #set up the book selection
+        self.Book2 = None
+        self.Book1 = None
+
+        self.RadioBook2Up = False
+        self.RadioBook1Up = False
     
     def handleVerseIn(self, text, startingVerse=True):
         components  = text.split(":")
-        #print(text)
+        
         #handle all the book abbreviations so they work with the xml file
-        if(len(components) != 3 or  not(components[1].isdigit()) or not (components[2].isdigit())):
+        if(len(components) != 2 or  not(components[0].isnumeric()) or not (components[1].isdigit())):
             if startingVerse:
                 self.VerseS = None
             else:
                 self.VerseE = None
         else:
-            cleanedBook = components[0].replace(" ","").lower()
-            if(self.bookAbbrev.get(cleanedBook) == None):
+            fullBook = self.Book2
+            if(startingVerse):
+                fullBook = self.Book1
+            chapter = int(components[0].replace(" ", ""))
+            verse = int(components[1].replace(" ", ""))
+            #check if the vers combo exists
+            cur = self.sqliteConnection.cursor()
+            cur.execute("select * from bibleKJV where book = ? and chapter = ? and verse = ?", (fullBook, chapter, verse))
+            if(cur.fetchall()):
                 if startingVerse:
-                    self.VerseS = None
+                    #set the correct number
+                    self.VerseS = str(fullBook).rjust(2, '0') + str(chapter).rjust(3,'0') +  str(verse).rjust(3, '0')
                 else:
-                    self.VerseE = None
-            else:
-                fullBook = self.bookAbbrev.get(cleanedBook)
-                chapter = int(components[1].replace(" ", ""))
-                verse = int(components[2].replace(" ", ""))
-                #check if the vers combo exists
-                cur = self.sqliteConnection.cursor()
-                cur.execute("select * from bibleKJV where book = ? and chapter = ? and verse = ?", (fullBook, chapter, verse))
-                if(cur.fetchall()):
-                    if startingVerse:
-                        #set the correct number
-                        self.VerseS = str(fullBook).rjust(2, '0') + str(chapter).rjust(3,'0') +  str(verse).rjust(3, '0')
-                    else:
-                        self.VerseE = str(fullBook).rjust(2, '0') + str(chapter).rjust(3,'0') +  str(verse).rjust(3, '0')
+                    self.VerseE = str(fullBook).rjust(2, '0') + str(chapter).rjust(3,'0') +  str(verse).rjust(3, '0')
 
     def GetPercentOT(self):
         
@@ -201,7 +220,7 @@ class Gui:
         self.newTestament.pie(sizes, labels=labels)
     
     def getName(self, book):
-        val = list(self.bookAbbrev.keys())[list(self.bookAbbrev.values()).index(book)]
+        val = BOOKS_OF_THE_BIBLE[book]
         return val
         #display the chart
 
@@ -231,7 +250,7 @@ class Gui:
         for verse in verses:
             #conver the sql date to a datetime object
             date_ob = datetime.strptime(verse[1], '%Y-%m-%d').date()
-            #print(date_ob)
+            
             vPerDay[int(str(date.today() - date_ob).split(" ")[0]) - 8] += int(verse[0])
 
         #graph the correct values
@@ -242,20 +261,23 @@ class Gui:
         # join the tables to get the correct value here
         self.cur.execute("select bibleKJV.verseText, bibleKJV.book, bibleKJV.chapter, bibleKJV.verse from bibleKJV Inner Join VerseHistory on bibleKJV.id=VerseHistory.Vcode2 order by VerseHistory.Vdate desc;")
         lastReading = self.cur.fetchall()
-        readingText = lastReading[0][0]
-        citationBook = self.getName(lastReading[0][1])
-        citationChapter = lastReading[0][2]
-        citationVerse = lastReading[0][3]
-        fullCitation = str(citationBook) + " " + str(citationChapter) + ":" + str(citationVerse)
+        if self.cur.rowcount < 1:
+            pass
+        else:
+            readingText = lastReading[0][0]
+            citationBook = self.getName(lastReading[0][1])
+            citationChapter = lastReading[0][2]
+            citationVerse = lastReading[0][3]
+            fullCitation = str(citationBook) + " " + str(citationChapter) + ":" + str(citationVerse)
 
-        #break on each 20th character
-        brokenReading = [readingText[i:i+20] for i in range(0, len(readingText), 20)]
-        alignmentOffset = 0.55
-        for text in brokenReading:
-            self.LastReadingsText = self.LastReadings.text(0.5, alignmentOffset, text, horizontalalignment="center", fontsize=10)
-            alignmentOffset -= 0.15
-        #add the citation at the end
-        self.LastReadingText = self.LastReadings.text(0.5, alignmentOffset,fullCitation, horizontalalignment="center", fontsize=10)
+            #break on each 20th character
+            brokenReading = [readingText[i:i+20] for i in range(0, len(readingText), 20)]
+            alignmentOffset = 0.55
+            for text in brokenReading:
+                self.LastReadingsText = self.LastReadings.text(0.5, alignmentOffset, text, horizontalalignment="center", fontsize=10)
+                alignmentOffset -= 0.15
+            #add the citation at the end
+            self.LastReadingText = self.LastReadings.text(0.5, alignmentOffset,fullCitation, horizontalalignment="center", fontsize=10)
     
     def updateAll(self):
         self.GetPercentOT()
@@ -267,13 +289,11 @@ class Gui:
         self.fig.canvas.flush_events()
 
     def VerseEntry(self, event):
-        #check that this is actually working
+         
+         #check that this is actually working
          self.cur.execute("select count(*) from bibleKJV where id between ? and ?",(self.VerseS, self.VerseE))
 
          vsum = self.cur.fetchall()
-         #print(self.VerseS + " " + self.VerseE)
-         #print("Vsum")
-         #print(vsum)
          self.cur.execute("insert into VerseHistory(Vcode1, Vcode2, Vsum, Vdate) values(?,?,?,DATE('now'))",(self.VerseS, self.VerseE,vsum[0][0]))
 
          self.sqliteConnection.commit()
@@ -282,6 +302,110 @@ class Gui:
 
          #update everything now that we have committed the data
          self.updateAll()
+    
+    def closedRadioButton2(self, event):
+        self.closedRadioButton(bookNum=2)
+    
+    #this is hacky and stupid but it just works
+    def closedRadioButton(self,event="dud",bookNum=1):
+        if(bookNum == 1):
+            plt.close('BookSelect1')
+            self.RadioBook1Up = False
+        else:
+            plt.close('BookSelect2')
+            self.RadioBook2Up = False
+
+    def setBook2(self, label):
+        self.Book2 = BOOKS_OF_THE_BIBLE.index(label)
+
+    def setBook1(self, label):
+        self.Book1 = BOOKS_OF_THE_BIBLE.index(label)
+
+    def SelectBook2(self, event):
+        if( not self.RadioBook2Up):
+            self.BookInputFigure2 = plt.figure(num='BookSelect2',figsize=(3,10))
+            #set up the radio button to fill the whole window
+            radioAxes = self.BookInputFigure2.add_axes([0, 0, 1, 1])
+            self.radioBtns2 = RadioButtons(radioAxes, BOOKS_OF_THE_BIBLE)
+            SubmitBookButton = self.BookInputFigure2.add_axes([0.55, 0, 0.3, 0.03])
+            self.SubmitBookButton2 = Button(SubmitBookButton, 'Select', color="maroon")
+            plt.show(block=False)
+            self.radioBtns2.on_clicked(self.setBook2)
+            #set up so the function closes the window so it is easier for the user to undersand 
+            #what is going on
+            self.SubmitBookButton2.on_clicked(self.closedRadioButton2)
+            self.RadioBook2Up = True
+
+    def SelectBook1(self, event, first=True):
+        if( not self.RadioBook1Up):
+            #open a new figure and select the right name for the book
+            self.BookInputFigure1 = plt.figure(num='BookSelect1',figsize=(3,10))
+            #cover the whole of the new figure
+            radioAxes = self.BookInputFigure1.add_axes([0, 0, 1, 1])
+            self.radioBtns1 = RadioButtons(radioAxes, BOOKS_OF_THE_BIBLE)
+            SubmitBookButton = self.BookInputFigure1.add_axes([0.55, 0, 0.3, 0.03])
+            self.SubmitBookButton1 = Button(SubmitBookButton, 'Select', color="maroon")
+            plt.show(block=False)
+            self.radioBtns1.on_clicked(self.setBook1)
+            self.SubmitBookButton1.on_clicked(self.closedRadioButton)
+            self.RadioBook1Up = True
+        
+    def CreateOTPies(self):
+        self.OTPie = plt.figure(num='OTChapters', figsize=(7, 7))
+        self.OTPieGs = GridSpec(nrows=8, ncols=5, wspace=2, hspace=.5)
+        #39 books in the OT
+        r = 0
+        c = 0
+        for i in range(39):
+            fixedChapter = i + 1
+            self.cur.execute("select count(*) from bibleKJV where book = ? and read = 1",(fixedChapter,))
+            read = self.cur.fetchall()
+            self.cur.execute("select count(*) from bibleKJV where book = ?",(fixedChapter,))
+            totalVerses = self.cur.fetchall()
+            otPlot = self.OTPie.add_subplot(self.OTPieGs[r,c])
+            c += 1
+            if(c > 4):
+                c = 0
+                r += 1
+            otPlot.set_title(BOOKS_OF_THE_BIBLE[i])
+            completed = (int(read[0][0]) / int(totalVerses[0][0])) * 10
+            otPlot.pie([100 - completed, completed])
+        plt.show(block=False)
+
+    def CreateNTPies(self):
+        self.NTPie = plt.figure(num='NTChapters', figsize=(7, 7))
+        self.NTPieGs = GridSpec(nrows=6, ncols=5, wspace=2, hspace=.5)
+        #27 books in the NT
+        r = 0
+        c = 0
+        for i in range(27):
+            fixedChapter = i + 39
+            self.cur.execute("select count(*) from bibleKJV where book = ? and read = 1", (fixedChapter,))
+            read = self.cur.fetchall()
+            self.cur.execute("select count(*) from bibleKJV where book = ?",(fixedChapter,))
+            totalVerses = self.cur.fetchall()
+            ntPlot = self.NTPie.add_subplot(self.OTPieGs[r,c])
+            c += 1
+            if(c > 4):
+                c = 0
+                r += 1
+            ntPlot.set_title(BOOKS_OF_THE_BIBLE[i+39])
+            completed = (int(read[0][0]) / int(totalVerses[0][0])) * 10
+            ntPlot.pie([100 - completed, completed])
+        plt.show(block=False)
+
+    # check if the pie plots have been clicked and if they have open up a new window with pie charts
+    # of individual chapters for the OT and NT 
+    def checkPieClick(self, event):
+        '''print('X: ' + str(event.x))
+        print('Y: ' + str(event.y))'''
+        #clicked on the new testament
+        if((event.x > 153 and event.x < 260) and (event.y > 350 and event.y < 435)):
+            self.CreateNTPies()
+        #clicked on the old testament
+        if((event.x > 153 and event.x < 260) and (event.y < 282 and event.y > 212)):
+            self.CreateOTPies()
+
     def setupInput(self):
         EndVerseAxes = self.fig.add_axes([0.745, 0.40, 0.155, 0.05])
         StartVerseAxes = self.fig.add_axes([0.745, 0.45, 0.155, 0.05])
@@ -305,8 +429,22 @@ class Gui:
         ButtonAxes = self.fig.add_axes([0.765, 0.315, 0.1, 0.075])
         self.subBtn = Button(ButtonAxes, 'submit', color="green")
         self.subBtn.on_clicked(self.VerseEntry)
+
+        #add a quick verse add button
+        Book1Button = self.fig.add_axes([0.62, 0.45, 0.12, 0.055])
+        self.subB1Btn = Button(Book1Button, 'first book', color="maroon")
+        
+        self.subB1Btn.on_clicked(self.SelectBook1)
+
+        Book2Button = self.fig.add_axes([0.62, 0.4, 0.12, 0.055])
+        self.subB2Btn = Button(Book2Button, 'second book', color="maroon")
+        
+        self.subB2Btn.on_clicked(self.SelectBook2)
         
         self.fig.suptitle("Bible Tracker")
+
+        #set up click events
+        plt.connect("button_press_event", self.checkPieClick)
 
     def handleVerseInEnd(self,text):
         self.handleVerseIn(text, startingVerse=False)  
@@ -315,7 +453,6 @@ class Gui:
    #setting up gui and plots
 def main():
     qui = Gui()
-    #qui.startDBConnection()
     qui.setupInput()
     qui.GetWeekly()
     plt.show()
